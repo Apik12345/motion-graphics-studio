@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Motion Graphics Studio</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><main class="shell">
+<header><div class="brandmark">✦</div><div><p class="eyebrow">CLOUD CREATIVE TOOL</p><h1>Motion Graphics Studio</h1><p class="muted">Create a motion-graphics insert, then continue editing in CapCut.</p></div><span class="pill">MVP · 1080p / 4K</span></header>
+<section class="workspace">
+<div class="panel upload"><div class="step">01 / SOURCE</div><h2>Drop in your clip</h2><label class="drop" id="drop"><input type="file" id="video" accept="video/*"><span class="uploadicon">↑</span><b>Choose a video</b><small>MP4, MOV, WebM or MKV</small><span id="filename" class="filelabel">No file selected</span></label><video id="preview" controls playsinline></video></div>
+<div class="panel controls"><div class="step">02 / DESIGN</div><h2>Tell it what to create</h2>
+<label>Headline<input id="headline" maxlength="90" value="MAKE EVERY MOMENT COUNT"></label>
+<label>Supporting text<input id="subheading" maxlength="140" value="Your story deserves a bold introduction"></label>
+<label>Visual direction<select id="style"><option value="cinematic">Professional cinematic</option><option value="corporate">Clean corporate</option><option value="social">Creative social media</option><option value="3d">Modern 3D-inspired colour treatment</option></select></label>
+<label>Placement<select id="position"><option value="bottom">Lower third</option><option value="top">Upper third</option></select></label>
+<div class="step extra">03 / EXPORT</div>
+<div class="twocol"><label>Resolution<select id="resolution"><option>1080p</option><option>4K</option></select></label><label>Output<select id="mode"><option value="composite">Finished video</option><option value="overlay">Transparent overlay</option></select></label></div>
+<p class="hint">Transparent overlay exports as a ProRes 4444 MOV. Import it above your footage in CapCut. Check that your CapCut version supports alpha-channel MOV.</p>
+<button id="render">✦ Generate motion graphics</button><div id="status" class="status"></div><a id="download" class="download" hidden>Download your render ↓</a>
+</div></section>
+<section class="foot"><b>What this first version does</b><p>It renders an animated title card over your video or as a transparent overlay. It is a working starter engine—not yet a generative video model. Prompt-based scene transformation, AI object tracking, complex 3D animation and automatic subject-aware graphics are planned integrations.</p></section>
+</main><script src="/static/app.js"></script></body></html>
