@@ -1,31 +1,21 @@
-# Motion Graphics Studio — MVP
+# Motion Graphics Studio v2
 
-A small web application for creating animated title-card graphics over a video, or exporting those graphics as a transparent ProRes 4444 MOV overlay for use above the original footage in CapCut.
+This upgrade adds two creation workflows:
 
-## Run locally
-1. Install Python 3.11+, FFmpeg, and DejaVu fonts.
-2. In this folder run:
-   ```bash
-   pip install -r requirements.txt
-   uvicorn main:app --reload
-   ```
-3. Open http://127.0.0.1:8000
+- **Use my video:** add an animated title-card graphic to video footage or export a graphics-only transparent MOV overlay.
+- **Create from prompt:** create a standalone animated graphic from a written brief using an included visual template.
 
-## Run with Docker
-```bash
-docker build -t motion-graphics-studio .
-docker run --rm -p 8000:8000 motion-graphics-studio
-```
+## Important current limitation
 
-## Current scope and limitations
-This is a functional starter MVP for animated title-card overlays and composited exports at 1080p or 4K. It does **not** yet connect to a generative AI video model. It does not currently perform full-scene stylization, subject/object tracking, arbitrary text-to-animation, or sophisticated 3D motion design. Those require integration with a selected AI video/graphics provider and API credentials.
+This is a deterministic FFmpeg motion-graphics renderer, not a generative AI video model. It does not yet create arbitrary 3D scenes, track objects, segment subjects, or generate photorealistic video from prompts. Those capabilities require connecting an external AI provider and API credentials. Automatic visual style selection currently uses simple prompt keyword rules.
 
-The transparent overlay is exported as ProRes 4444 MOV. Alpha-channel import support can vary by CapCut version/device; if it does not import correctly, export a finished composite instead.
+## Starter runtime limits
 
-## Before public cloud deployment
-- Add authentication and per-user storage.
-- Add upload-size limits, quotas, job queue and automatic cleanup.
-- Store API keys as server-side environment secrets, never in browser code.
-- Use private object storage and signed download URLs.
-- Add rate limiting, malware scanning, monitoring and privacy/retention controls.
-- Use a GPU-backed provider only when adding generative video features.
+- Upload size: 80 MB maximum
+- Clip duration: 30 seconds maximum
+- Output sizes: 1080p and 4K
+- Free Render instances have limited CPU/RAM and may sleep when idle. For first tests, use short 1080p clips.
+
+## Render deployment
+
+Use the existing Dockerfile. Root directory: `motion-graphics-studio-mvp/motion_graphics_studio`. Dockerfile path: `Dockerfile`.
