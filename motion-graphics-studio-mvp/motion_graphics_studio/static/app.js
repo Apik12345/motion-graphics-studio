@@ -1,6 +1,59 @@
-const $=id=>document.getElementById(id);let selected=null;
-$("video").addEventListener("change",e=>{selected=e.target.files[0];if(!selected)return;$("filename").textContent=selected.name;$("preview").src=URL.createObjectURL(selected);$("preview").style.display="block";$("download").hidden=true;});
-$("render").addEventListener("click",async()=>{if(!selected){$("status").textContent="Choose a video clip first.";return;}
-const b=$("render");b.disabled=true;b.textContent="Rendering…";$("download").hidden=true;$("status").textContent="Uploading and rendering your clip. 4K may take longer.";
-const data=new FormData();data.append("video",selected);["headline","subheading","style","position","resolution"].forEach(k=>data.append(k,$(k).value));data.append("output_mode",$("mode").value);
-try{const r=await fetch("/api/render",{method:"POST",body:data});const j=await r.json();if(!r.ok)throw new Error(j.detail||"Render failed");$("download").href=j.download_url;$("download").download=j.filename;$("download").hidden=false;$("status").textContent=`Render complete · ${j.resolution} · ${j.mode}\n${j.note}`;}catch(e){$("status").textContent="Could not render: "+e.message;}finally{b.disabled=false;b.textContent="✦ Generate motion graphics";}});
+const $ = id => document.getElementById(id);
+let selectedVideo = null;
+let mode = "video";
+
+document.querySelectorAll(".mode").forEach(button => {
+  button.addEventListener("click", () => {
+    mode = button.dataset.mode;
+    document.querySelectorAll(".mode").forEach(item => item.classList.toggle("active", item === button));
+    $("videoMode").hidden = mode !== "video";
+    $("promptMode").hidden = mode !== "prompt";
+    $("download").hidden = true;
+    $("status").textContent = "";
+    $("output").value = "composite";
+  });
+});
+
+$("video").addEventListener("change", event => {
+  selectedVideo = event.target.files && event.target.files[0];
+  if (!selectedVideo) return;
+  $("filename").textContent = selectedVideo.name;
+  $("preview").src = URL.createObjectURL(selectedVideo);
+  $("preview").style.display = "block";
+  $("download").hidden = true;
+});
+
+$("render").addEventListener("click", async () => {
+  if (mode === "video" && !selectedVideo) {
+    $("status").textContent = "Choose a video clip first.";
+    return;
+  }
+  if (mode === "prompt" && !$("prompt").value.trim() && !$("headline").value.trim()) {
+    $("status").textContent = "Describe the animation or enter a headline first.";
+    return;
+  }
+  const button = $("render");
+  button.disabled = true;
+  button.textContent = "Creating your motion graphic…";
+  $("download").hidden = true;
+  $("status").textContent = "Preparing your design and rendering. Keep this page open.";
+  const form = new FormData();
+  if (selectedVideo && mode === "video") form.append("video", selectedVideo);
+  form.append("mode", mode);
+  ["prompt", "headline", "subheading", "style", "position", "resolution"].forEach(key => form.append(key, $(key).value));
+  form.append("output_mode", $("output").value);
+  try {
+    const response = await fetch("/api/render", { method: "POST", body: form });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || `Server error (${response.status})`);
+    $("download").href = result.download_url;
+    $("download").download = result.filename;
+    $("download").hidden = false;
+    $("status").textContent = `Render complete · ${result.mode} mode · ${result.style} · ${result.resolution}\n${result.note}`;
+  } catch (error) {
+    $("status").textContent = `Could not render: ${error.message}`;
+  } finally {
+    button.disabled = false;
+    button.textContent = "✦ Generate motion graphics";
+  }
+});
