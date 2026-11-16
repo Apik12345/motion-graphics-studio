@@ -10,7 +10,6 @@ document.querySelectorAll(".mode").forEach(button => {
     $("promptMode").hidden = mode !== "prompt";
     $("download").hidden = true;
     $("status").textContent = "";
-    $("output").value = "composite";
   });
 });
 
@@ -32,26 +31,31 @@ $("render").addEventListener("click", async () => {
     $("status").textContent = "Describe the animation or enter a headline first.";
     return;
   }
+
   const button = $("render");
   button.disabled = true;
   button.textContent = "Creating your motion graphic…";
   $("download").hidden = true;
-  $("status").textContent = "Preparing your design and rendering. Keep this page open.";
+  $("status").textContent = "Preparing your design and rendering. Please keep this page open.";
+
   const form = new FormData();
   if (selectedVideo && mode === "video") form.append("video", selectedVideo);
   form.append("mode", mode);
   ["prompt", "headline", "subheading", "style", "position", "resolution"].forEach(key => form.append(key, $(key).value));
   form.append("output_mode", $("output").value);
+
   try {
     const response = await fetch("/api/render", { method: "POST", body: form });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.detail || `Server error (${response.status})`);
+    let result;
+    try { result = await response.json(); }
+    catch { throw new Error("The server returned an unreadable response (" + response.status + "). Check Render logs."); }
+    if (!response.ok) throw new Error(result.detail || ("Server error (" + response.status + ")"));
     $("download").href = result.download_url;
     $("download").download = result.filename;
     $("download").hidden = false;
-    $("status").textContent = `Render complete · ${result.mode} mode · ${result.style} · ${result.resolution}\n${result.note}`;
+    $("status").textContent = "Render complete · " + result.mode + " mode · " + result.style + " · " + result.resolution + "\n" + result.note;
   } catch (error) {
-    $("status").textContent = `Could not render: ${error.message}`;
+    $("status").textContent = "Could not render: " + error.message;
   } finally {
     button.disabled = false;
     button.textContent = "✦ Generate motion graphics";
