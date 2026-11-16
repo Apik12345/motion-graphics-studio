@@ -12,13 +12,14 @@ from fastapi.staticfiles import StaticFiles
 BASE = Path(__file__).parent
 WORK = BASE / "work"
 WORK.mkdir(exist_ok=True)
+
 app = FastAPI(title="Motion Graphics Studio")
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 
-ALLOWED = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
-MAX_BYTES = 100 * 1024 * 1024
-MAX_SECONDS = 45
-OUTPUT_PATTERN = re.compile(r"[0-9a-f]{32}_output[.](mp4|mov)")
+ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
+MAX_UPLOAD_BYTES = 80 * 1024 * 1024
+MAX_DURATION_SECONDS = 30
+OUTPUT_PATTERN = re.compile(r"[0-9a-f]{32}_output\.(mp4|mov)")
 
 
 @app.get("/")
@@ -28,75 +29,82 @@ def home():
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "motion-graphics-studio"}
 
 
 def run_ffmpeg(command):
-    result = subprocess.run(command, capture_output=True, text=True, timeout=240)
+    result = subprocess.run(command, capture_output=True, text=True, timeout=210)
     if result.returncode:
-        raise RuntimeError((result.stderr or "FFmpeg failed")[-2200:])
+        message = (result.stderr or "Video processing failed.")[-2200:]
+        raise RuntimeError(message)
 
 
-def probe(path):
+def probe_video(path):
     raw = subprocess.check_output(
-        ["ffprobe", "-v", "error", "-show_entries",
-         "format=duration:stream=width,height", "-of", "json", str(path)],
-        text=True, timeout=30
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration:stream=width,height", "-of", "json", str(path)],
+        text=True,
+        timeout=25,
     )
     data = json.loads(raw)
-    stream = next((s for s in data.get("streams", []) if "width" in s), None)
+    stream = next((item for item in data.get("streams", []) if "width" in item), None)
     if stream is None:
-        raise ValueError("Uploaded file has no video stream.")
-    return float(data["format"]["duration"])
+        raise ValueError("The uploaded file does not contain a video stream.")
+    return float(data["format"]["duration"]), int(stream["width"]), int(stream["height"])
 
 
-def resolve_style(style, prompt):
-    if style in {"cinematic", "corporate", "social", "3d"}:
+def choose_style(style, prompt):
+    if style != "auto":
         return style
     text = (prompt or "").lower()
-    if any(x in text for x in ("corporate", "business", "clean", "minimal", "professional")):
+    if any(word in text for word in ("corporate", "business", "clean", "minimal", "professional")):
         return "corporate"
-    if any(x in text for x in ("3d", "depth", "rotate", "floating", "three-dimensional")):
+    if any(word in text for word in ("3d", "three-dimensional", "depth", "rotate", "floating")):
         return "3d"
-    if any(x in text for x in ("social", "tiktok", "reel", "bold", "playful", "energetic")):
+    if any(word in text for word in ("social", "tiktok", "reel", "bold", "playful", "energetic")):
         return "social"
     return "cinematic"
 
 
-def accent_for(style):
-    return {"corporate":"0x27A6A1", "social":"0xFF4D8D", "3d":"0xA78BFA"}.get(style, "0xE6B85C")
+def style_color(style):
+    return {
+        "corporate": "0x27A6A1",
+        "social": "0xFF4D8D",
+        "3d": "0xA78BFA",
+        "cinematic": "0xE6B85C",
+    }.get(style, "0xE6B85C")
 
 
-def graphics_filter(title_path, subtitle_path, style, position, duration):
-    accent = accent_for(style)
-    y_box = "ih-330" if position == "bottom" else "150"
-    y_title = "main_h-282" if position == "bottom" else "198"
-    y_sub = "main_h-195" if position == "bottom" else "285"
-    y_line = "ih-125" if position == "bottom" else "355"
-    start = 0.25
-    end = max(1.0, min(6.0, duration - 0.1))
-    fade_end = max(start + 0.25, end - 0.4)
-    alpha = (
-        f"if(lt(t\\,{start + 0.4})\\,max(0\\,(t-{start})/0.4)\\,"
-        f"if(gt(t\\,{fade_end})\\,max(0\\,({end}-t)/0.4)\\,1))"
+def graphic_filters(title_file, subtitle_file, style, position, duration, width, height):
+    accent = style_color(style)
+    y = str(height - 320) if position == "bottom" else "120"
+    panel_width = width - 120
+    title_size = max(34, int(height / 22))
+    subtitle_size = max(22, int(height / 42))
+    start = 0.2
+    end = min(6.0, max(1.0, duration - 0.08))
+    slide = "90*exp(-9*t)"
+    filters = [
+        f"drawbox=x='60+{slide}':y={y}:w={panel_width}:h=235:color=black@0.72:t=fill:enable='between(t,{start},{end})'",
+        f"drawbox=x='60+{slide}':y={y}:w=12:h=235:color={accent}:t=fill:enable='between(t,{start},{end})'",
+        f"drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:textfile='{title_file}':expansion=none:fontcolor=white:fontsize={title_size}:x='112+{slide}':y={int(y)+42}:enable='between(t,{start},{end})'",
+    ]
+    if subtitle_file.read_text(encoding="utf-8").strip():
+        filters.append(
+            f"drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:textfile='{subtitle_file}':expansion=none:fontcolor=white:fontsize={subtitle_size}:x='114+{slide}':y={int(y)+128}:enable='between(t,{start + 0.05},{end})'"
+        )
+    filters.append(
+        f"drawbox=x='112+{slide}':y={int(y)+194}:w={width-230}:h=5:color={accent}:t=fill:enable='between(t,{start + 0.1},{end})'"
     )
-    return (
-        f"drawbox=x=60:y={y_box}:w=iw-120:h=250:color=black@0.70:t=fill:enable='between(t,{start},{end})',"
-        f"drawbox=x=60:y={y_box}:w=14:h=250:color={accent}:t=fill:enable='between(t,{start},{end})',"
-        f"drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:textfile='{title_path}':reload=0:fontcolor=white:fontsize=main_h/22:x=112:y={y_title}:alpha='{alpha}':enable='between(t,{start},{end})',"
-        f"drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:textfile='{subtitle_path}':reload=0:fontcolor=white:fontsize=main_h/42:x=114:y={y_sub}:alpha='{alpha}':enable='between(t,{start},{end})',"
-        f"drawbox=x=112:y={y_line}:w=iw-230:h=5:color={accent}:t=fill:enable='between(t,{start+0.1},{end})'"
-    )
+    return ",".join(filters)
 
 
-def prompt_backdrop(style):
-    accent = accent_for(style)
-    bg = {"3d":"0x15112B", "social":"0x24101E", "corporate":"0x0D2529"}.get(style, "0x101B31")
-    filters = (
-        f"drawbox=x='mod(t*230,iw+240)-120':y=0:w=120:h=ih:color={accent}@0.22:t=fill,"
-        "drawbox=x=70:y=70:w=iw-140:h=ih-140:color=white@0.035:t=8"
-    )
-    return bg, filters
+def prompt_background(style):
+    return {
+        "cinematic": "0x101B31",
+        "corporate": "0x0D2529",
+        "social": "0x24101E",
+        "3d": "0x15112B",
+    }.get(style, "0x101B31")
 
 
 @app.post("/api/render")
@@ -114,80 +122,85 @@ async def render(
     mode = mode if mode in {"video", "prompt"} else "video"
     output_mode = output_mode if output_mode in {"composite", "overlay"} else "composite"
     resolution = resolution if resolution in {"1080p", "4K"} else "1080p"
-    position = position if position in {"top", "bottom"} else "bottom"
+    position = position if position in {"bottom", "top"} else "bottom"
     if len(prompt) > 700 or len(headline) > 90 or len(subheading) > 140:
         raise HTTPException(400, "Please shorten the prompt, headline or supporting text.")
     if mode == "video" and video is None:
-        raise HTTPException(400, "Choose a video clip first.")
+        raise HTTPException(400, "Upload a video clip first.")
     if mode == "prompt" and not prompt.strip() and not headline.strip():
-        raise HTTPException(400, "Describe the animation or enter a headline.")
+        raise HTTPException(400, "Describe the animation you want, or enter a headline.")
 
     job = uuid.uuid4().hex
-    source = None
-    title_path = WORK / f"{job}_title.txt"
-    sub_path = WORK / f"{job}_subtitle.txt"
-    output = WORK / f"{job}_output.{'mov' if output_mode == 'overlay' else 'mp4'}"
+    src = None
+    title_file = WORK / f"{job}_title.txt"
+    subtitle_file = WORK / f"{job}_subtitle.txt"
+    out = WORK / f"{job}_output.{'mov' if output_mode == 'overlay' else 'mp4'}"
+
     try:
-        chosen_style = resolve_style(style, prompt)
+        chosen_style = choose_style(style, prompt)
         if not headline.strip():
-            headline = (re.sub(r"\\s+", " ", prompt).strip()[:64].rstrip(" .,:;!?") or "YOUR NEXT BIG IDEA").upper()
+            words = re.sub(r"\s+", " ", prompt).strip().split()
+            headline = " ".join(words[:7]).strip(" .,:;!?")[:64].upper() or "YOUR NEXT BIG IDEA"
         if not subheading.strip() and mode == "prompt":
-            subheading = " ".join(re.sub(r"\\s+", " ", prompt).split()[8:])[:110]
-        title_path.write_text(headline.strip() or " ", encoding="utf-8")
-        sub_path.write_text(subheading.strip() or " ", encoding="utf-8")
+            words = re.sub(r"\s+", " ", prompt).strip().split()
+            subheading = " ".join(words[7:])[:110]
+
+        title_file.write_text(headline.strip() or " ", encoding="utf-8")
+        subtitle_file.write_text(subheading.strip() or " ", encoding="utf-8")
         width, height = (3840, 2160) if resolution == "4K" else (1920, 1080)
 
         if mode == "video":
-            ext = Path(video.filename or "").suffix.lower()
-            if ext not in ALLOWED:
+            extension = Path(video.filename or "").suffix.lower()
+            if extension not in ALLOWED_EXTENSIONS:
                 raise HTTPException(400, "Use MP4, MOV, M4V, WebM or MKV video.")
-            source = WORK / f"{job}_source{ext}"
-            content = await video.read(MAX_BYTES + 1)
-            if len(content) > MAX_BYTES:
-                raise HTTPException(413, "This starter version accepts videos up to 100 MB.")
-            source.write_bytes(content)
-            duration = probe(source)
-            if duration > MAX_SECONDS:
-                raise HTTPException(400, f"Use a video clip no longer than {MAX_SECONDS} seconds on this free-hosted version.")
+            src = WORK / f"{job}_source{extension}"
+            contents = await video.read(MAX_UPLOAD_BYTES + 1)
+            if len(contents) > MAX_UPLOAD_BYTES:
+                raise HTTPException(413, "This starter version accepts videos up to 80 MB.")
+            src.write_bytes(contents)
+            duration, _, _ = probe_video(src)
+            if duration > MAX_DURATION_SECONDS:
+                raise HTTPException(400, f"For the current free server, use a clip no longer than {MAX_DURATION_SECONDS} seconds.")
             if duration <= 0:
-                raise HTTPException(400, "Could not read the video's duration.")
-            graphic = graphics_filter(title_path, sub_path, chosen_style, position, duration)
+                raise HTTPException(400, "The uploaded video's duration could not be read.")
+            overlays = graphic_filters(title_file, subtitle_file, chosen_style, position, duration, width, height)
             if output_mode == "overlay":
                 command = [
                     "ffmpeg", "-y", "-f", "lavfi", "-i",
                     f"color=c=black@0.0:s={width}x{height}:r=30:d={duration}",
-                    "-vf", f"format=rgba,{graphic}", "-c:v", "qtrle", "-pix_fmt", "argb", str(output)
+                    "-vf", f"format=rgba,{overlays}", "-c:v", "qtrle", "-pix_fmt", "argb", str(out)
                 ]
             else:
                 scale_pad = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
                 command = [
-                    "ffmpeg", "-y", "-i", str(source), "-vf", f"{scale_pad},{graphic}",
-                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "24",
-                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
-                    "-movflags", "+faststart", str(output)
+                    "ffmpeg", "-y", "-i", str(src), "-vf", f"{scale_pad},{overlays}",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "24", "-threads", "1",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(out)
                 ]
         else:
             duration = 7.0
-            graphic = graphics_filter(title_path, sub_path, chosen_style, position, duration)
+            overlays = graphic_filters(title_file, subtitle_file, chosen_style, position, duration, width, height)
             if output_mode == "overlay":
-                background = f"color=c=black@0.0:s={width}x{height}:r=30:d={duration}"
-                filters = f"format=rgba,{graphic}"
-                codec = ["-c:v", "qtrle", "-pix_fmt", "argb"]
+                source = f"color=c=black@0.0:s={width}x{height}:r=30:d={duration}"
+                filters = f"format=rgba,{overlays}"
+                codecs = ["-c:v", "qtrle", "-pix_fmt", "argb"]
             else:
-                bg, shapes = prompt_backdrop(chosen_style)
-                background = f"color=c={bg}:s={width}x{height}:r=30:d={duration}"
-                filters = f"{shapes},{graphic}"
-                codec = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "24", "-pix_fmt", "yuv420p"]
-            command = ["ffmpeg", "-y", "-f", "lavfi", "-i", background, "-vf", filters, *codec, "-movflags", "+faststart", str(output)]
+                bg = prompt_background(chosen_style)
+                source = f"color=c={bg}:s={width}x{height}:r=30:d={duration}"
+                shape_color = style_color(chosen_style)
+                moving = f"drawbox=x='mod(t*240\\,{width}+200)-100':y=0:w=100:h={height}:color={shape_color}@0.22:t=fill,drawbox=x=70:y=70:w={width-140}:h={height-140}:color=white@0.04:t=8"
+                filters = f"{moving},{overlays}"
+                codecs = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "24", "-threads", "1", "-pix_fmt", "yuv420p"]
+            command = ["ffmpeg", "-y", "-f", "lavfi", "-i", source, "-vf", filters, *codecs, "-movflags", "+faststart", str(out)]
 
         run_ffmpeg(command)
         return {
-            "download_url": f"/api/download/{output.name}",
-            "filename": output.name,
+            "download_url": f"/api/download/{out.name}",
+            "filename": out.name,
             "mode": mode,
             "resolution": resolution,
             "style": chosen_style,
-            "note": "This version creates prompt-directed motion-graphics templates. Full AI-generated scenes, custom 3D object animation and subject tracking still require a connected AI generation provider."
+            "note": "Prompt-directed motion-graphics templates are available. Generative AI scene creation and true object tracking still require a connected AI video provider."
         }
     except HTTPException:
         raise
@@ -196,7 +209,7 @@ async def render(
     except Exception as exc:
         raise HTTPException(500, f"Render failed: {str(exc)[-1400:]}")
     finally:
-        for path in (source, title_path, sub_path):
+        for path in (src, title_file, subtitle_file):
             if path:
                 try:
                     path.unlink(missing_ok=True)
@@ -210,6 +223,6 @@ def download(name: str):
         raise HTTPException(404, "File not found.")
     path = WORK / name
     if not path.is_file():
-        raise HTTPException(404, "This render is no longer available. Please generate it again.")
+        raise HTTPException(404, "This render is no longer available. Please create it again.")
     media_type = "video/quicktime" if name.endswith(".mov") else "video/mp4"
     return FileResponse(path, filename=name, media_type=media_type)
